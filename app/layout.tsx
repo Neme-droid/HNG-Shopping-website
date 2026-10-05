@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Fraunces, Hanken_Grotesk } from 'next/font/google';
+import { AuthProvider } from '@/lib/auth';
 import { CartProvider } from '@/lib/cart';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -17,12 +18,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${fraunces.variable} ${hanken.variable}`}>
       <body>
-        <CartProvider>
-          <a href="#main-content" className="skip-link">Skip to main content</a>
-          <Header />
-          <main id="main-content">{children}</main>
-          <Footer />
-        </CartProvider>
+        <AuthProvider>
+          <CartProvider>
+            <a href="#main-content" className="skip-link">Skip to main content</a>
+            <Header />
+            <main id="main-content">{children}</main>
+            <Footer />
+          </CartProvider>
+        </AuthProvider>
       </body>
     </html>
   );

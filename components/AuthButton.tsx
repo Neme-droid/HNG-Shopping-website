@@ -1,40 +1,34 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import type { User } from '@supabase/supabase-js';
-import { createClient } from '@/lib/supabase/client';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth';
+import { PROTECTED_PATHS } from '@/lib/auth-redirect';
 
+// Header control. Google sign-in now lives on the /auth page, not here.
 export default function AuthButton() {
-  const [supabase] = useState(() => createClient());
-  const [user, setUser] = useState<User | null>(null);
+  const { user, ready, signOut } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) =>
-      setUser(session?.user ?? null)
-    );
-    return () => sub.subscription.unsubscribe();
-  }, [supabase]);
+  if (!ready) return <span className="auth-slot" aria-hidden="true" />;
 
   if (user) {
     return (
-      <button className="link-button" onClick={() => supabase.auth.signOut()}>
+      <button
+        type="button"
+        className="link-button"
+        onClick={async () => {
+          await signOut();
+          // Leave pages that need an account; otherwise just refresh what's on screen.
+          if (PROTECTED_PATHS.some((p) => pathname.startsWith(p))) router.replace('/');
+          router.refresh();
+        }}
+      >
         Sign out
       </button>
     );
   }
 
-  return (
-    <button
-      className="link-button"
-      onClick={() =>
-        supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: { redirectTo: `${location.origin}/auth/callback` },
-        })
-      }
-    >
-      Sign in with Google
-    </button>
-  );
+  return <Link href="/auth" className="link-button">Sign in</Link>;
 }

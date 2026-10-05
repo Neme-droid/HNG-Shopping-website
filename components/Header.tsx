@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useCart } from '@/lib/cart';
+import { useAuth } from '@/lib/auth';
+import { authHref } from '@/lib/auth-redirect';
 import { LeafLogo } from './icons';
 import AuthButton from './AuthButton';
 
@@ -16,6 +18,9 @@ const links = [
 export default function Header() {
   const [open, setOpen] = useState(false);
   const { count } = useCart();
+  const { user } = useAuth();
+  // Signed-out visitors are sent to sign in first; if they turn out to be signed in, /auth forwards them straight on.
+  const shopHref = user ? '/#featured' : authHref('/#featured');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
@@ -53,7 +58,7 @@ export default function Header() {
           </svg>
           <span className="cart-count" aria-hidden="true">{count}</span>
         </Link>
-        <Link href="/#featured" className="cta-button secondary">Shop now</Link>
+        <Link href={shopHref} className="cta-button secondary">Shop now</Link>
       </div>
     </header>
   );
