@@ -6,7 +6,7 @@ import { useCart } from '@/lib/cart';
 import { useAuth } from '@/lib/auth';
 import { authHref } from '@/lib/auth-redirect';
 
-export default function AddToCartButton({ slug, quantity = 1, className = '' }: { slug: string; quantity?: number; className?: string }) {
+export default function AddToCartButton({ slug, quantity = 1, className = '', disabled = false }: { slug: string; quantity?: number; className?: string; disabled?: boolean }) {
   const { add } = useCart();
   const { user, ready, requireUser } = useAuth();
   const router = useRouter();
@@ -19,6 +19,7 @@ export default function AddToCartButton({ slug, quantity = 1, className = '' }: 
     <button
       type="button"
       className={`product-button${added ? ' added' : ''} ${className}`.trim()}
+      disabled={disabled}
       onClick={async () => {
         // If the page has only just loaded, ask Supabase directly rather than guessing.
         const signedIn = ready ? user : await requireUser();
@@ -32,7 +33,7 @@ export default function AddToCartButton({ slug, quantity = 1, className = '' }: 
         timer.current = setTimeout(() => setAdded(false), 1400);
       }}
     >
-      {added ? 'Added ✓' : 'Add to cart'}
+      {disabled ? 'Out of stock' : added ? 'Added ✓' : 'Add to cart'}
     </button>
   );
 }

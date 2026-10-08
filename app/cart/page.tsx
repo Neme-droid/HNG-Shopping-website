@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import QuantityStepper from '@/components/QuantityStepper';
 import { useCart } from '@/lib/cart';
+import ProductImage from '@/components/ProductImage';
 import { formatPrice } from '@/lib/products';
 
 export default function CartPage() {
@@ -28,7 +29,7 @@ export default function CartPage() {
           {lines.map(({ product, quantity, lineTotalCents }) => (
             <li className="cart-line" key={product.slug}>
               <Link href={`/products/${product.slug}`} aria-hidden="true" tabIndex={-1}>
-                <div className="cart-thumb product-image" style={{ background: `var(--c-${product.category})` }} />
+                <ProductImage product={product} className="cart-thumb" />
               </Link>
               <div>
                 <Link href={`/products/${product.slug}`} className="cart-line-name">{product.name}</Link>

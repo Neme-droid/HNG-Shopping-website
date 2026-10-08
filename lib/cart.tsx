@@ -1,7 +1,8 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
-import { getProduct, type Product } from './products';
+import { useProducts } from './products-context';
+import type { Product } from './products';
 
 // The cart stores only { slug, quantity }. Names and prices are looked up from the
 // catalogue on every render, and the server must re-price at checkout anyway.
@@ -47,7 +48,7 @@ function readStorage(): CartLine[] {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
     if (!Array.isArray(raw)) return [];
     return raw
-      .filter((l) => l && typeof l.slug === 'string' && getProduct(l.slug)) // drop unknown/removed products
+      .filter((l) => l && typeof l.slug === 'string') // unknown/removed products are hidden when resolving, not deleted, so a slow or failed fetch never wipes the cart
       .map((l) => ({ slug: l.slug as string, quantity: clamp(Number(l.quantity)) }));
   } catch {
     return [];
@@ -68,6 +69,7 @@ type CartContextValue = {
 const CartContext = createContext<CartContextValue | null>(null);
 
 export function CartProvider({ children }: { children: ReactNode }) {
+  const { products, getProduct } = useProducts();
   const [{ lines: stored, ready }, dispatch] = useReducer(reducer, { lines: [], ready: false });
   const [toast, setToast] = useState<{ msg: string; show: boolean }>({ msg: '', show: false });
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -99,7 +101,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setToast({ msg: `Added ${product.name} to your cart`, show: true });
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setToast((t) => ({ ...t, show: false })), 2200);
-  }, []);
+  }, [getProduct]);
 
   const value = useMemo<CartContextValue>(() => {
     const lines = stored.flatMap((l) => {
@@ -116,7 +118,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       remove: (slug) => dispatch({ type: 'remove', slug }),
       clear: () => dispatch({ type: 'clear' }),
     };
-  }, [stored, ready, add]);
+  }, [stored, ready, add, getProduct, products]);
 
   return (
     <CartContext.Provider value={value}>

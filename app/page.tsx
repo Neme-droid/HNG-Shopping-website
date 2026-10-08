@@ -2,7 +2,7 @@ import Link from 'next/link';
 import ProductGrid from '@/components/ProductGrid';
 import NewsletterForm from '@/components/NewsletterForm';
 import { Icon, categoryIcons, valueIcons } from '@/components/icons';
-import { categories, isCategory, products } from '@/lib/products';
+import { categories, isCategory } from '@/lib/products';
 
 const values = [
   { title: 'Pure sourcing', text: 'We partner with organic farms and ethical wildcrafters committed to chemical-free growing.' },
@@ -74,7 +74,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ c
             <h2 className="section-title">Customer favorites</h2>
             <p className="section-subtitle">Hand-selected for quality and purity.</p>
           </header>
-          <ProductGrid key={initial} products={products} initialFilter={initial} />
+          <ProductGrid key={initial} initialFilter={initial} />
         </div>
       </section>
 

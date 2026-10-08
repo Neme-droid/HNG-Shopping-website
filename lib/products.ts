@@ -1,19 +1,26 @@
-// Placeholder catalogue. Step 2 replaces this with a Supabase query
-// (select from `products` where active = true) behind the same function names.
+// Catalogue types + pure helpers shared by the website AND the mobile app.
+// The products themselves live in the Supabase `products` table: nothing here is a hard-coded product list.
+// This file has no framework imports so Next.js and React Native can both use it.
+import { productCopy } from './product-copy';
 
 export type CategoryId = 'cosmetics' | 'edibles' | 'medicine' | 'shoes' | 'clothes' | 'seeds';
-
 export type Category = { id: CategoryId; name: string; description: string };
 
 export type Product = {
+  id?: string;
   slug: string;
   name: string;
   category: CategoryId;
-  badge?: 'New' | 'Best seller';
+  badge?: string;
   description: string;
   about: string;
   details: string[];
-  priceCents: number;
+  priceCents: number; // Supabase stores dollars (product_price = 28); we keep integer cents in memory to avoid float errors
+  imageUrl?: string; // best image URL (public storage URL)
+  imageFallbackUrl?: string; // tried if imageUrl fails to load (e.g. an original signed URL)
+  stock?: number; // undefined = not tracked
+  featured: boolean;
+  sku?: string;
 };
 
 export const categories: Category[] = [
@@ -25,64 +32,135 @@ export const categories: Category[] = [
   { id: 'seeds', name: 'Seeds', description: 'Heirloom vegetable, herb and flower seeds to grow your own.' },
 ];
 
-export const products: Product[] = [
-  {
-    slug: 'lavender-facial-serum', name: 'Lavender Facial Serum', category: 'cosmetics', badge: 'New', priceCents: 2800,
-    description: 'Hydrating serum with organic lavender and jojoba oil.',
-    about: 'A light serum that sinks in fast and leaves skin soft, not greasy. Gentle enough for sensitive skin.',
-    details: ['30 ml glass bottle with dropper', 'Organic lavender, jojoba and vitamin E', 'No synthetic fragrance'],
-  },
-  {
-    slug: 'wildflower-honey', name: 'Wildflower Honey', category: 'edibles', badge: 'Best seller', priceCents: 1600,
-    description: 'Raw, unfiltered honey from mountain meadows.',
-    about: 'Harvested in small batches and jarred without heating, so the flavour changes with the season.',
-    details: ['350 g glass jar', 'Raw and unfiltered', 'May crystallise naturally; warm gently to loosen'],
-  },
-  {
-    slug: 'echinacea-tincture', name: 'Echinacea Tincture', category: 'medicine', badge: 'New', priceCents: 2200,
-    description: 'Herbal extract for immune support, in an alcohol base.',
-    about: 'Made from the root and flowering tops of organically grown echinacea, extracted in small batches.',
-    details: ['50 ml amber bottle with dropper', 'Organic echinacea in an alcohol base', 'Check with your doctor if you are pregnant or on medication'],
-  },
-  {
-    slug: 'cork-wanderer-sandals', name: 'Cork Wanderer Sandals', category: 'shoes', badge: 'Best seller', priceCents: 4800,
-    description: 'Cork footbed with a natural rubber sole.',
-    about: 'A contoured cork footbed that moulds to your foot over the first few weeks, on a flexible natural rubber sole.',
-    details: ['Cork footbed, natural rubber sole', 'Adjustable hemp straps', 'Sizes EU 36 to 46'],
-  },
-  {
-    slug: 'linen-summer-tunic', name: 'Linen Summer Tunic', category: 'clothes', badge: 'New', priceCents: 3600,
-    description: 'Lightweight organic linen for warm days.',
-    about: 'A loose, breathable tunic that softens with every wash. Cut long enough to wear over trousers or alone.',
-    details: ['100% organic linen', 'Machine wash cold', 'Sizes XS to XL'],
-  },
-  {
-    slug: 'heirloom-tomato-mix', name: 'Heirloom Tomato Mix', category: 'seeds', badge: 'Best seller', priceCents: 500,
-    description: 'Cherry, beefsteak and plum varieties in one packet.',
-    about: 'Open-pollinated seeds you can save year after year. Sow indoors six weeks before the last frost.',
-    details: ['About 40 seeds per packet', 'Open-pollinated heirloom varieties', 'Paper packet, plastic-free'],
-  },
-  {
-    slug: 'shea-butter-body-cream', name: 'Shea Butter Body Cream', category: 'cosmetics', badge: 'Best seller', priceCents: 2400,
-    description: 'Rich moisturizer with organic shea and coconut oil.',
-    about: 'A thick, slow-absorbing cream for dry skin. A little goes a long way.',
-    details: ['150 ml tin', 'Organic shea butter and coconut oil', 'Lightly scented with essential oils'],
-  },
-  {
-    slug: 'organic-quinoa', name: 'Organic Quinoa', category: 'edibles', badge: 'New', priceCents: 800,
-    description: 'White quinoa, high in protein and gluten-free.',
-    about: 'Pre-rinsed white quinoa that cooks in fifteen minutes. Good in salads, bowls and porridge.',
-    details: ['500 g paper bag', 'Certified organic', 'Gluten-free'],
-  },
-];
+export const isCategory = (v: string | undefined | null): v is CategoryId => categories.some((c) => c.id === v);
+export const categoryName = (id: CategoryId) => categories.find((c) => c.id === id)?.name ?? id;
 
-export const getProduct = (slug: string) => products.find((p) => p.slug === slug);
-export const getRelated = (p: Product, n = 4) =>
-  [...products.filter((x) => x.category === p.category && x.slug !== p.slug),
-   ...products.filter((x) => x.category !== p.category)].slice(0, n);
-export const isCategory = (v: string | undefined): v is CategoryId => categories.some((c) => c.id === v);
-export const categoryName = (id: CategoryId) => categories.find((c) => c.id === id)!.name;
+/** Columns of the Supabase `products` table that we read. `about` / `details` are optional extras. */
+export const PRODUCT_TABLE = 'products';
+export const PRODUCT_BUCKET = 'product_images';
 
-// One place to change currency. Store minor units (cents/kobo) as integers.
-const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-export const formatPrice = (cents: number) => money.format(cents / 100);
+// ---------- price ----------
+/** The dollar sign ALWAYS comes first: 2800 -> "$28.00", 123456 -> "$1,234.56". Same output on web and mobile. */
+export function formatPrice(cents: number): string {
+  const safe = Number.isFinite(cents) ? Math.round(cents) : 0;
+  const abs = Math.abs(safe);
+  const dollars = Math.floor(abs / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const rest = String(abs % 100).padStart(2, '0');
+  return `${safe < 0 ? '-' : ''}$${dollars}.${rest}`;
+}
+
+/** product_price from Supabase (number, "28", "28.50" or even "$28") -> integer cents. null if unusable. */
+export function priceToCents(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : parseFloat(String(value ?? '').replace(/[^0-9.\-]/g, ''));
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100);
+}
+
+// ---------- images ----------
+const enc = (path: string) => path.split('/').map((s) => encodeURIComponent(decodeSafe(s))).join('/');
+function decodeSafe(s: string) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+const publicUrl = (origin: string, bucket: string, path: string) => `${origin}/storage/v1/object/public/${bucket}/${enc(path)}`;
+
+/**
+ * The `image_url` values in the table are not all real image links. This turns each kind into a URL that
+ * actually shows a picture (the bucket must be public, see supabase/products-setup.sql):
+ *  - a Supabase DASHBOARD link  (https://supabase.com/dashboard/project/<ref>/storage/files/buckets/<bucket>?preview=<file>)
+ *  - a SIGNED link (…/object/sign/<bucket>/<file>?token=…): becomes the public link, the signed one is kept as fallback
+ *  - a normal https image link: used as is
+ *  - a bare file name or path ("Lavender Facial Serum.jpeg"): looked up in the `product_images` bucket
+ */
+export function resolveImage(raw: unknown, supabaseUrl?: string): { url?: string; fallback?: string } {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return {};
+  const base = (supabaseUrl ?? '').replace(/\/+$/, '');
+
+  const dash = value.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)\/storage\/files\/buckets\/([^/?#]+)\?(?:[^#]*&)?preview=([^&#]+)/i);
+  if (dash) {
+    const [, ref, bucket, file] = dash;
+    return { url: publicUrl(`https://${ref}.supabase.co`, bucket, decodeSafe(file.replace(/\+/g, ' '))) };
+  }
+
+  const signed = value.match(/^(https?:\/\/[^/]+)\/storage\/v1\/object\/sign\/([^/]+)\/([^?#]+)/i);
+  if (signed) return { url: publicUrl(signed[1], signed[2], signed[3]), fallback: value };
+
+  if (/^https?:\/\//i.test(value)) return { url: value };
+
+  return base ? { url: publicUrl(base, PRODUCT_BUCKET, value.replace(/^\/+/, '')) } : {};
+}
+
+// ---------- rows -> products ----------
+const truthy = (v: unknown, whenMissing: boolean) => {
+  if (v === null || v === undefined || v === '') return whenMissing;
+  if (typeof v === 'string') return v.trim().toLowerCase() === 'true' || v.trim() === '1' || v.trim().toLowerCase() === 't';
+  return Boolean(v);
+};
+const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+
+function toDetails(v: unknown): string[] | null {
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  if (typeof v === 'string' && v.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(v);
+      if (Array.isArray(parsed)) return parsed.map((x) => String(x).trim()).filter(Boolean);
+    } catch {
+      /* not JSON: treat as one detail per line */
+    }
+    return v.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  }
+  return null;
+}
+
+/** One Supabase row -> Product. Returns null (and says why in `warn`) when the row can't be shown. */
+export function toProduct(row: Record<string, unknown>, supabaseUrl?: string, warn: (m: string) => void = () => {}): Product | null {
+  const slug = text(row.slug);
+  const name = text(row.name);
+  if (!slug || !name) return (warn(`skipped a product without slug/name`), null);
+  if (!truthy(row.active, true)) return null; // hidden in Supabase
+
+  const category = text(row.product_categories).toLowerCase();
+  if (!isCategory(category)) return (warn(`skipped "${slug}": unknown category "${row.product_categories}"`), null);
+
+  const priceCents = priceToCents(row.product_price);
+  if (priceCents === null) return (warn(`skipped "${slug}": invalid product_price "${row.product_price}"`), null);
+
+  const copy = productCopy[slug];
+  const image = resolveImage(row.image_url, supabaseUrl);
+  const stockNum = row.stock === null || row.stock === undefined || row.stock === '' ? NaN : Number(row.stock);
+
+  return {
+    id: typeof row.id === 'string' ? row.id : undefined,
+    slug,
+    name,
+    category,
+    badge: text(row.badge) || undefined,
+    description: text(row.description),
+    about: text(row.about) || copy?.about || '',
+    details: toDetails(row.details) ?? copy?.details ?? [],
+    priceCents,
+    imageUrl: image.url,
+    imageFallbackUrl: image.fallback,
+    stock: Number.isFinite(stockNum) ? Math.max(0, Math.floor(stockNum)) : undefined,
+    featured: truthy(row.is_featured, false),
+    sku: text(row.sku) || undefined,
+  };
+}
+
+export function toProducts(rows: unknown, supabaseUrl?: string, warn?: (m: string) => void): Product[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((r) => {
+    const p = r && typeof r === 'object' ? toProduct(r as Record<string, unknown>, supabaseUrl, warn) : null;
+    return p ? [p] : [];
+  });
+}
+
+// ---------- lookups (always take the current list, which comes from Supabase) ----------
+export const findProduct = (list: Product[], slug: string) => list.find((p) => p.slug === slug);
+export const getRelated = (list: Product[], p: Product, n = 4) =>
+  [...list.filter((x) => x.category === p.category && x.slug !== p.slug), ...list.filter((x) => x.category !== p.category)].slice(0, n);
+export const inStock = (p: Product) => p.stock === undefined || p.stock > 0;
