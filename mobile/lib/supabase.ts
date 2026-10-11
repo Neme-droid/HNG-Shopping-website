@@ -27,6 +27,7 @@ export const supabase = createClient(isSupabaseConfigured ? url : 'https://place
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    flowType: 'pkce', // Google sign-in returns ?code=... (survives Android deep links) instead of a #fragment
   },
 });
 

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import type { User } from '@supabase/supabase-js';
+import { parseOAuthUrl } from './oauth-url';
 import { isSupabaseConfigured, supabase } from './supabase';
 
 type SignUpResult = { error?: string; signedIn?: boolean; alreadyRegistered?: boolean };
@@ -13,7 +14,8 @@ type AuthContextValue = {
   requireUser: () => Promise<User | null>;
   signIn: (email: string, password: string) => Promise<string | null>; // returns an error message or null
   signUp: (fullName: string, email: string, password: string) => Promise<SignUpResult>;
-  signInWithGoogle: () => Promise<string | null>; // returns an error message, or null on success / if the customer cancelled
+  signInWithGoogle: () => Promise<string | null>; // returns a message to show, or null on success
+  completeOAuthFromUrl: (url: string) => Promise<string | null>; // finishes a Google sign-in from the app's return link
   signOut: () => Promise<string | null>;
 };
 
@@ -22,6 +24,27 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const NOT_CONFIGURED = 'Sign in is unavailable: the app’s Supabase URL or key is missing or invalid. Fix EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY in mobile/.env (or eas.json for an APK) and restart or rebuild.';
 
 WebBrowser.maybeCompleteAuthSession();
+
+const handledCodes = new Set<string>(); // an auth code can only be used once; two code paths may see the same link
+
+/** Reads ?code=… (PKCE) or #access_token=… (implicit) from the link Supabase returned to, and signs in. */
+async function finishOAuth(url: string): Promise<{ done: boolean; error?: string }> {
+  const link = parseOAuthUrl(url);
+  if (link.error) return { done: true, error: friendlyError(link.error) };
+
+  const { code, access_token, refresh_token } = link;
+  if (code) {
+    if (handledCodes.has(code)) return { done: true };
+    handledCodes.add(code);
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    return { done: true, error: error ? friendlyError(error.message) : undefined };
+  }
+  if (access_token && refresh_token) {
+    const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+    return { done: true, error: error ? friendlyError(error.message) : undefined };
+  }
+  return { done: false };
+}
 
 // Mirrors the website's friendlyError(), plus network failures, which only happen on mobile.
 export function friendlyError(message: string): string {
@@ -102,25 +125,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Google via Supabase OAuth in the system browser. The redirect URL must be allowed in Supabase
-  // (Authentication > URL Configuration): terraverde://** for the APK, exp://** for Expo Go.
+  // Google via Supabase OAuth in the system browser. The return address must be allowed in Supabase
+  // (Authentication > URL Configuration > Redirect URLs), otherwise Supabase sends the browser to the Site URL instead.
   const signInWithGoogle = useCallback(async () => {
     if (!isSupabaseConfigured) return NOT_CONFIGURED;
+    const redirectTo = Linking.createURL('auth/callback'); // terraverde://auth/callback in the APK, exp://…/--/auth/callback in Expo Go
+    const hint = `Google sign-in didn’t come back to the app. Add this exact address to Supabase > Authentication > URL Configuration > Redirect URLs, then try again:\n${redirectTo}`;
     try {
-      const redirectTo = Linking.createURL('auth/callback');
       const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo, skipBrowserRedirect: true } });
       if (error || !data.url) return friendlyError(error?.message ?? 'Couldn’t start Google sign-in.');
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-      if (result.type !== 'success') return null; // closed or cancelled: not an error
-      const query = result.url.split('#')[1] ?? result.url.split('?')[1] ?? '';
-      const params = new URLSearchParams(query);
-      const failure = params.get('error_description') ?? params.get('error');
-      if (failure) return friendlyError(failure.replace(/\+/g, ' '));
-      const access_token = params.get('access_token');
-      const refresh_token = params.get('refresh_token');
-      if (!access_token || !refresh_token) return 'Google sign-in didn’t complete. Make sure the redirect URL is allowed in Supabase, then try again.';
-      const { error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
-      return sessionError ? friendlyError(sessionError.message) : null;
+      if (result.type === 'success') {
+        const outcome = await finishOAuth(result.url);
+        return outcome.error ?? (outcome.done ? null : hint);
+      }
+      // Android may hand the link to the app's own callback screen instead; give it a moment, then check.
+      await new Promise((r) => setTimeout(r, 1200));
+      const { data: s } = await supabase.auth.getSession();
+      return s.session ? null : hint;
+    } catch (e) {
+      return toMessage(e);
+    }
+  }, []);
+
+  const completeOAuthFromUrl = useCallback(async (url: string) => {
+    if (!isSupabaseConfigured) return null;
+    try {
+      const outcome = await finishOAuth(url);
+      return outcome.error ?? null;
     } catch (e) {
       return toMessage(e);
     }
@@ -146,8 +178,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, ready, configured: isSupabaseConfigured, requireUser, signIn, signUp, signInWithGoogle, signOut }),
-    [user, ready, requireUser, signIn, signUp, signInWithGoogle, signOut],
+    () => ({ user, ready, configured: isSupabaseConfigured, requireUser, signIn, signUp, signInWithGoogle, completeOAuthFromUrl, signOut }),
+    [user, ready, requireUser, signIn, signUp, signInWithGoogle, completeOAuthFromUrl, signOut],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
